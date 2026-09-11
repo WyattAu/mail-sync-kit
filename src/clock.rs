@@ -12,7 +12,7 @@ use std::{
 pub type UnixMillis = i64;
 
 /// Source of wall-clock time; injectable for deterministic tests.
-pub trait Clock: Send + Sync {
+pub trait SyncClock: Send + Sync {
     /// Current wall time in milliseconds since the epoch.
     fn now_unix_ms(&self) -> UnixMillis;
 }
@@ -22,7 +22,7 @@ pub trait Clock: Send + Sync {
 #[derive(Debug, Default, Clone, Copy)]
 pub struct SystemClock;
 
-impl Clock for SystemClock {
+impl SyncClock for SystemClock {
     fn now_unix_ms(&self) -> UnixMillis {
         // INVARIANT: audited site — the clock abstraction itself. All other
         // code must go through `Clock`.
@@ -57,7 +57,7 @@ impl FakeClock {
     }
 }
 
-impl Clock for FakeClock {
+impl SyncClock for FakeClock {
     fn now_unix_ms(&self) -> UnixMillis {
         self.now.read().map_or(0, |n| *n)
     }

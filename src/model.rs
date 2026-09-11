@@ -341,7 +341,7 @@ mod tests {
         assert_eq!(h.to_hex().len(), 64);
         assert_eq!(BlobHash::parse_hex(h.to_hex()), Some(h.clone()));
         assert_eq!(h.shard_prefix(), "ab/ab");
-        assert_eq!(BlobHash::parse_hex(h.to_hex().to_uppercase()), Some(h));
+        assert_eq!(BlobHash::parse_hex(&h.to_hex().to_uppercase()), Some(h));
         assert_eq!(BlobHash::parse_hex("zz"), None);
         assert_eq!(BlobHash::parse_hex("abc"), None);
     }

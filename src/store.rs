@@ -7,7 +7,7 @@ use async_trait::async_trait;
 use crate::{
     error::StoreError,
     model::{
-        AccountId, BlobHash, ConnectionState, FolderId, FolderRole, FolderSummary, Flag,
+        AccountId, BlobHash, ConnectionState, Flag, FolderId, FolderRole, FolderSummary,
         MessagePage, OutboxId, SortSpec, Window,
     },
 };

@@ -35,7 +35,10 @@ mod tests {
     #[test]
     fn defaults_stay_under_server_idle_cutoff() {
         let cfg = SyncConfig::default();
-        assert!(cfg.idle_timeout_mins < 30, "IDLE re-issue must stay under the common 30 min server cutoff");
+        assert!(
+            cfg.idle_timeout_mins < 30,
+            "IDLE re-issue must stay under the common 30 min server cutoff"
+        );
         assert!(cfg.poll_interval_secs > 0);
         assert!(cfg.body_prefetch_recent > 0);
     }

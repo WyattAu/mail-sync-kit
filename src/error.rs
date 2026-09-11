@@ -6,7 +6,7 @@
 //! test assertions.
 
 /// Errors internal to the sync engines.
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum SyncError {
     /// Transport/auth/storage failure surfaced by the store seam.
     #[error(transparent)]
@@ -62,7 +62,7 @@ pub enum SyncError {
 }
 
 /// Storage-seam error returned by [`crate::store::MailStore`] methods.
-#[derive(Debug, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum StoreError {
     /// Requested entity does not exist.
     #[error("not found: {0}")]
@@ -88,7 +88,10 @@ mod tests {
             detail: "closed".into(),
         };
         assert_eq!(e.to_string(), "transport: closed");
-        assert_eq!(SyncError::CredentialsRejected.to_string(), "credentials rejected");
+        assert_eq!(
+            SyncError::CredentialsRejected.to_string(),
+            "credentials rejected"
+        );
         assert_eq!(
             SyncError::SmtpTransient { code: 421 }.to_string(),
             "smtp transient 421"

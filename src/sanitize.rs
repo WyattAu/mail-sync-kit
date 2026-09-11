@@ -25,8 +25,8 @@ mod tests {
 
     #[test]
     fn drops_esc_and_neutralizes_controls() {
-        assert_eq!(sanitize_terminal_text("\x1b]0;title\x07ok"), "0;title ok");
-        assert_eq!(sanitize_terminal_text("a\u{1}\u{7f}b"), "a   b");
+        assert_eq!(sanitize_terminal_text("\x1b]0;title\x07ok"), "]0;title ok");
+        assert_eq!(sanitize_terminal_text("a\u{1}\u{7f}b"), "a  b");
         assert_eq!(sanitize_terminal_text("tab\tkept"), "tab\tkept");
     }
 

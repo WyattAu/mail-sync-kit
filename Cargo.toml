@@ -2,21 +2,21 @@
 name = "mail-sync-kit"
 description = "Protocol-agnostic mail sync engines: IMAP (QRESYNC/CONDSTORE/IDLE), JMAP, SMTP submission (XOAUTH2), and an outbox queue"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 rust-version = "1.85"
-license = "MIT"
+license = "MIT OR Apache-2.0"
 repository = "https://github.com/WyattAu/mail-sync-kit"
-keywords = ["email", "imap", "jmap", "smtp", "sync"]
-categories = ["email", "network-programming"]
+keywords = ["imap", "jmap", "email", "sync", "smtp"]
+categories = ["email", "asynchronous"]
 exclude = ["/target"]
 
 [dependencies]
-tokio = { version = "1", features = ["net", "rt", "sync", "time", "macros"] }
+tokio = { version = "1", features = ["net", "rt", "sync", "time", "macros", "io-util"] }
 tokio-util = "0.7"
 async-trait = "0.1"
 thiserror = "2"
 tracing = "0.1"
-uuid = { version = "1", features = ["v7"] }
+uuid = { version = "1", features = ["v7", "serde"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
@@ -28,11 +28,11 @@ tokio-rustls = { version = "0.26", default-features = false, features = ["ring"]
 lettre = { version = "0.11", default-features = false, features = ["tokio1", "tokio1-rustls-tls", "builder", "smtp-transport"] }
 base64 = "0.22"
 chrono = "0.4"
-zeroize = "1"
+zeroize = { version = "1", features = ["derive"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 
 [dev-dependencies]
-tokio = { version = "1", features = ["rt-multi-thread", "test-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "test-util"] }
 
 [lints.rust]
 missing_docs = "deny"

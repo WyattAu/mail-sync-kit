@@ -17,7 +17,6 @@ use std::{
 
 use base64::Engine as _;
 use imap_next::{
-    Interrupt, Io, State as _,
     client::{Client, Event, Options},
     imap_types::{
         auth::{AuthMechanism, AuthenticateData},
@@ -28,6 +27,7 @@ use imap_next::{
         response::{Code, Data, Status, StatusKind},
         secret::Secret,
     },
+    Interrupt, Io, State as _,
 };
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, ReadBuf},
@@ -231,7 +231,7 @@ impl AsyncWrite for Transport {
 }
 
 const READ_CHUNK: usize = 16 * 1024;
-const CMD_TIMEOUT: Duration = Duration::from_mins(1);
+const CMD_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// A driven IMAP session.
 pub struct ImapSession {
@@ -352,13 +352,11 @@ impl ImapSession {
                 Ok(event) => return Ok(event),
                 Err(Interrupt::Io(Io::NeedMoreInput)) => {
                     let mut chunk = [0u8; READ_CHUNK];
-                    let n = self
-                        .transport
-                        .read(&mut chunk)
-                        .await
-                        .map_err(|e| SyncError::Transport {
+                    let n = self.transport.read(&mut chunk).await.map_err(|e| {
+                        SyncError::Transport {
                             detail: e.to_string(),
-                        })?;
+                        }
+                    })?;
                     if n == 0 {
                         return Err(SyncError::Transport {
                             detail: "server closed connection".into(),
@@ -383,13 +381,13 @@ impl ImapSession {
     async fn drive_until_greeting(&mut self) -> SyncResult<()> {
         loop {
             let event = Box::pin(self.pump()).await?;
-            if let Event::GreetingReceived { greeting } = event
-                && let Some(Code::Capability(caps)) = &greeting.code
-            {
-                for c in caps.as_ref() {
-                    self.capabilities.insert(format!("{c:?}"));
+            if let Event::GreetingReceived { greeting } = event {
+                if let Some(Code::Capability(caps)) = &greeting.code {
+                    for c in caps.as_ref() {
+                        self.capabilities.insert(format!("{c:?}"));
+                    }
+                    return Ok(());
                 }
-                return Ok(());
             }
         }
     }
@@ -586,10 +584,7 @@ impl ImapSession {
                     ..
                 } => {
                     let challenge = continuation_request_data(&continuation_request);
-                    let answer =
-                        session
-                            .respond(&challenge)
-                            .map_err(|e| SyncError::Sasl(e))?;
+                    let answer = session.respond(&challenge).map_err(SyncError::Sasl)?;
                     let data =
                         AuthenticateData::Continue(Secret::new(std::borrow::Cow::Owned(answer)));
                     if self.client.set_authenticate_data(data).is_err() {
@@ -655,12 +650,15 @@ impl ImapSession {
                 Event::IdleAccepted { .. } => {
                     accepted = true;
                 }
-                Event::IdleCommandSent { .. } | Event::IdleDoneSent { .. } if true => {}
-                Event::IdleRejected { status, .. } => {
-                    return Err(SyncError::Protocol(format!("IDLE rejected: {status:?}")));
+                Event::IdleCommandSent { .. } | Event::ContinuationRequestReceived { .. } => {
+                    // Idle acceptance arrives as IdleAccepted; anything
+                    // further here is tolerated and ignored.
                 }
                 Event::IdleDoneSent { .. } => {
                     done_sent = true;
+                }
+                Event::IdleRejected { status, .. } => {
+                    return Err(SyncError::Protocol(format!("IDLE rejected: {status:?}")));
                 }
                 Event::DataReceived { data } => {
                     unsolicited.extend(Unsolicited::from_data(&data));
@@ -679,10 +677,6 @@ impl ImapSession {
                         return Ok(unsolicited);
                     }
                     let _ = status;
-                }
-                Event::ContinuationRequestReceived { .. } => {
-                    // Idle acceptance arrives as IdleAccepted; anything
-                    // further here is tolerated and ignored.
                 }
                 other => {
                     tracing::debug!(?other, "unexpected during idle");
@@ -709,13 +703,16 @@ async fn tls_connect(
     host: &str,
     tcp: TcpStream,
 ) -> SyncResult<tokio_rustls::client::TlsStream<TcpStream>> {
-    let name = rustls_pki_types::ServerName::try_from(host.to_owned())
-        .map_err(|e| SyncError::Tls {
+    let name =
+        rustls_pki_types::ServerName::try_from(host.to_owned()).map_err(|e| SyncError::Tls {
             detail: e.to_string(),
         })?;
-    connector.connect(name, tcp).await.map_err(|e| SyncError::Tls {
-        detail: e.to_string(),
-    })
+    connector
+        .connect(name, tcp)
+        .await
+        .map_err(|e| SyncError::Tls {
+            detail: e.to_string(),
+        })
 }
 
 fn continuation_request_data(
@@ -734,6 +731,10 @@ fn continuation_request_data(
 mod tests {
     use super::*;
 
+    fn nz(n: u32) -> std::num::NonZeroU32 {
+        std::num::NonZeroU32::new(n).unwrap_or(std::num::NonZeroU32::MIN)
+    }
+
     #[test]
     fn unsolicited_exists_recent_expunge() {
         assert_eq!(
@@ -744,7 +745,7 @@ mod tests {
             Unsolicited::from_data(&Data::Recent(3)),
             vec![Unsolicited::Recent(3)]
         );
-        let seq = imap_next::imap_types::sequence::SequenceSet::try_from("7").unwrap();
+        let seq = nz(7);
         assert_eq!(
             Unsolicited::from_data(&Data::Expunge(seq)),
             vec![Unsolicited::Expunge(7)]
@@ -754,26 +755,19 @@ mod tests {
     #[test]
     fn unsolicited_fetch_requires_uid_and_flags() {
         // UID only: no event.
-        let items = vec![MessageDataItem::Uid(
-            imap_next::imap_types::sequence::Uid::new(
-                std::num::NonZeroU32::new(9).unwrap_or(std::num::NonZeroU32::MIN),
-            )
-            .unwrap(),
-        )];
+        let items = vec![MessageDataItem::Uid(nz(9))];
         assert!(Unsolicited::from_data(&Data::Fetch {
-            seq: None,
-            items: items.clone().into(),
+            seq: nz(1),
+            items: imap_next::imap_types::core::Vec1::try_from(items.clone()).unwrap(),
         })
         .is_empty());
         // UID + flags: one event.
         let mut both = items;
-        both.push(MessageDataItem::Flags(
-            vec![FlagFetch::Flag(Flag::Seen)].into(),
-        ));
+        both.push(MessageDataItem::Flags(vec![FlagFetch::Flag(Flag::Seen)]));
         assert_eq!(
             Unsolicited::from_data(&Data::Fetch {
-                seq: None,
-                items: both.into(),
+                seq: nz(1),
+                items: imap_next::imap_types::core::Vec1::try_from(both).unwrap(),
             }),
             vec![Unsolicited::FetchFlags {
                 uid: 9,
@@ -784,27 +778,22 @@ mod tests {
 
     #[test]
     fn unsolicited_unknown_becomes_other() {
-        let events = Unsolicited::from_data(&Data::Capability(
-            imap_next::imap_types::utils::attributes::CapabilitySet::try_from(
-                imap_next::imap_types::capability::Capability::Imap4rev1,
-            )
-            .unwrap(),
-        ));
+        let events =
+            Unsolicited::from_data(&Data::Capability(imap_next::imap_types::core::Vec1::from(
+                [imap_next::imap_types::response::Capability::Imap4Rev1],
+            )));
         assert!(matches!(events.as_slice(), [Unsolicited::Other(_)]));
     }
 
     #[test]
     fn command_outcome_is_ok_and_summary() {
-        let status = Status::Tagged(
-            imap_next::imap_types::response::Tagged {
-                tag: imap_next::imap_types::core::Tag::try_from("K1").unwrap(),
-                body: imap_next::imap_types::response::StatusBody {
-                    kind: StatusKind::Ok,
-                    code: None,
-                    text: imap_next::imap_types::response::Text::try_from("done").unwrap(),
-                },
-            },
-        );
+        let status = imap_next::imap_types::response::Status::new(
+            Some(imap_next::imap_types::core::Tag::try_from("K1").unwrap()),
+            StatusKind::Ok,
+            None,
+            "done",
+        )
+        .unwrap();
         let outcome = CommandOutcome {
             status: status.clone(),
             data: Vec::new(),
