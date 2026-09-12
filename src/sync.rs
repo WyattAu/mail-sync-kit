@@ -71,6 +71,53 @@ impl<S: MailStore + ?Sized> SyncService<S> {
         }
     }
 
+    /// Whether this account must use the polling fallback instead of IDLE.
+    ///
+    /// True when the server does not advertise IDLE, or when the account
+    /// host is on the configured `idle_poll_only_hosts` denylist
+    /// (matched case-insensitively). This is the observable decision point
+    /// for [`crate::config::SyncConfig::idle_poll_only_hosts`]:
+    /// `run_one_cycle` takes the IDLE branch exactly when this returns
+    /// false.
+    #[must_use]
+    pub fn should_poll(&self, idle_supported: bool) -> bool {
+        !idle_supported
+            || self
+                .config
+                .idle_poll_only_hosts
+                .iter()
+                .any(|h| h.eq_ignore_ascii_case(&self.params.host))
+    }
+
+    /// How long one IDLE command may block before it is re-issued.
+    ///
+    /// Derived from [`crate::config::SyncConfig::idle_timeout_mins`];
+    /// stays under the common 30-minute server cutoff when the default
+    /// (29 minutes) is used. `run_one_cycle` passes this to
+    /// `ImapSession::idle`.
+    #[must_use]
+    pub fn idle_timeout(&self) -> Duration {
+        Duration::from_secs(60 * self.config.idle_timeout_mins)
+    }
+
+    /// How long the polling fallback dwells between passes.
+    ///
+    /// Derived from [`crate::config::SyncConfig::poll_interval_secs`];
+    /// `run_one_cycle` sleeps this long between poll passes.
+    #[must_use]
+    pub fn poll_interval(&self) -> Duration {
+        Duration::from_secs(self.config.poll_interval_secs)
+    }
+
+    /// How many recent bodies per folder the background prefetch reads.
+    ///
+    /// Derived from [`crate::config::SyncConfig::body_prefetch_recent`];
+    /// `prefetch_recent` uses this as the store listing limit.
+    #[must_use]
+    pub fn prefetch_limit(&self) -> u64 {
+        self.config.body_prefetch_recent as u64
+    }
+
     /// Runs the state machine until cancellation, reconnecting with
     /// exponential backoff (250 ms doubling to 5 min; reset on success).
     #[tracing::instrument(skip_all, fields(account = %self.account))]
@@ -133,23 +180,37 @@ impl<S: MailStore + ?Sized> SyncService<S> {
             self.sync_folder(&mut session, &folder).await?;
         }
 
-        // IDLE loop (or polling fallback).
+        // Polling fallback (or IDLE loop).
         let idle_supported = session.has_capability("IDLE");
-        let poll_only = self
-            .config
-            .idle_poll_only_hosts
-            .iter()
-            .any(|h| h.eq_ignore_ascii_case(&self.params.host));
-        if idle_supported && !poll_only {
+        if self.should_poll(idle_supported) {
+            // Polling fallback.
+            loop {
+                let jitter = self.poll_interval();
+                tokio::select! {
+                    () = cancel.cancelled() => {
+                        session.logout().await;
+                        return Ok(());
+                    }
+                    () = tokio::time::sleep(jitter) => {}
+                }
+                self.emit_state(ConnectionState::Syncing).await;
+                let folders = self.list_stored_folders().await;
+                for folder in folders {
+                    if cancel.is_cancelled() {
+                        session.logout().await;
+                        return Ok(());
+                    }
+                    self.sync_folder(&mut session, &folder).await?;
+                }
+            }
+        } else {
             self.emit_state(ConnectionState::Idle).await;
             loop {
                 if cancel.is_cancelled() {
                     session.logout().await;
                     return Ok(());
                 }
-                let woke = session
-                    .idle(Duration::from_secs(60 * self.config.idle_timeout_mins))
-                    .await?;
+                let woke = session.idle(self.idle_timeout()).await?;
                 if cancel.is_cancelled() {
                     session.logout().await;
                     return Ok(());
@@ -167,27 +228,6 @@ impl<S: MailStore + ?Sized> SyncService<S> {
                         self.sync_folder(&mut session, &folder).await?;
                     }
                     self.emit_state(ConnectionState::Idle).await;
-                }
-            }
-        } else {
-            // Polling fallback.
-            loop {
-                let jitter = Duration::from_secs(self.config.poll_interval_secs);
-                tokio::select! {
-                    () = cancel.cancelled() => {
-                        session.logout().await;
-                        return Ok(());
-                    }
-                    () = tokio::time::sleep(jitter) => {}
-                }
-                self.emit_state(ConnectionState::Syncing).await;
-                let folders = self.list_stored_folders().await;
-                for folder in folders {
-                    if cancel.is_cancelled() {
-                        session.logout().await;
-                        return Ok(());
-                    }
-                    self.sync_folder(&mut session, &folder).await?;
                 }
             }
         }
@@ -532,7 +572,7 @@ impl<S: MailStore + ?Sized> SyncService<S> {
                 folder.id,
                 crate::model::Window {
                     offset: 0,
-                    limit: self.config.body_prefetch_recent as u64,
+                    limit: self.prefetch_limit(),
                 },
                 crate::model::SortSpec {
                     field: crate::model::SortField::Date,

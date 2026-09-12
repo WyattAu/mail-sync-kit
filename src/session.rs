@@ -383,9 +383,7 @@ impl ImapSession {
             let event = Box::pin(self.pump()).await?;
             if let Event::GreetingReceived { greeting } = event {
                 if let Some(Code::Capability(caps)) = &greeting.code {
-                    for c in caps.as_ref() {
-                        self.capabilities.insert(format!("{c:?}"));
-                    }
+                    self.absorb_capability_list(caps.as_ref());
                     return Ok(());
                 }
             }
@@ -454,9 +452,18 @@ impl ImapSession {
 
     fn absorb_capabilities(&mut self, data: &Data<'_>) {
         if let Data::Capability(caps) = data {
-            for c in caps.as_ref() {
-                self.capabilities.insert(format!("{c:?}"));
-            }
+            self.absorb_capability_list(caps.as_ref());
+        }
+    }
+
+    /// Records advertised capabilities by their wire names (`IMAP4rev1`,
+    /// `AUTH=PLAIN`, `IDLE`, …) so `has_capability` matches what servers
+    /// actually send. (Storing `Debug` strings silently broke mechanism
+    /// matching — `Auth(Plain)` never equals `AUTH=PLAIN` — which deaded the
+    /// `ConnectParams::mechanisms` knob into a permanent LOGIN fallback.)
+    fn absorb_capability_list(&mut self, caps: &[imap_next::imap_types::response::Capability<'_>]) {
+        for c in caps {
+            self.capabilities.insert(c.to_string());
         }
     }
 
