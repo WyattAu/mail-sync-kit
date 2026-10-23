@@ -1,4 +1,5 @@
 # mail-sync-kit
+[![Estate integration](https://github.com/WyattAu/estate-integration/actions/workflows/ci.yml/badge.svg)](https://github.com/WyattAu/estate-integration/actions/workflows/ci.yml)
 
 Protocol-agnostic mail sync engines: IMAP (CONDSTORE deltas, UIDVALIDITY
 reconciliation, IDLE with polling fallback), JMAP (RFC 8620/8621), SMTP
