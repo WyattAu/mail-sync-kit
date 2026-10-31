@@ -15,7 +15,7 @@ mail-sync-kit = "0.1"
 
 ## Trait boundaries
 
-The crate owns its entire vocabulary — no application core is required.
+The crate owns its entire vocabulary; no application core is required.
 Everything is injected:
 
 | Seam | Type | Notes |
@@ -30,18 +30,18 @@ Everything is injected:
 
 ## Engines
 
-- `SyncService` — per-account IMAP state machine: Disconnected → Connecting →
+- `SyncService`; per-account IMAP state machine: Disconnected → Connecting →
   Authenticating → Hierarchy → Delta → IDLE, with exponential-backoff
   reconnects and UIDVALIDITY reconciliation.
-- `JmapSyncService` — the JMAP analogue: session discovery, `Mailbox/get`
+- `JmapSyncService`; the JMAP analogue: session discovery, `Mailbox/get`
   hierarchy, `Email/query` + `Email/get` delta sync via state tokens.
-- `OutboxService` — drains due rows through SMTP, files sent mail via IMAP
+- `OutboxService`; drains due rows through SMTP, files sent mail via IMAP
   APPEND, emits `OutboxRetry`/`MailSent`/`MailFailed`, and honors an
   offline gate. `flush_once()` is available for hosts that drive flushing
   themselves.
-- `ImapSession` — the single-flight IMAP session driver (TLS, STARTTLS,
+- `ImapSession`; the single-flight IMAP session driver (TLS, STARTTLS,
   SASL AUTHENTICATE with continuations, IDLE).
-- `submit_envelope` — raw RFC 5322 SMTP submission with explicit envelope
+- `submit_envelope`; raw RFC 5322 SMTP submission with explicit envelope
   (Bcc-safe).
 
 `tls::webpki_connector()` builds a rustls connector over the bundled
